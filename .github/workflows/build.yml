@@ -42,7 +42,9 @@ jobs:
       shell: pwsh
 
     - name: Build
-      run: go build -v -ldflags="-s -w" -o antihook.exe .
+      run: go build -v -ldflags="-s -w -X main.DefaultServerURL=${{ env.KIRO_SERVER_URL }}" -o antihook.exe .
+      env:
+        KIRO_SERVER_URL: ${{ secrets.KIRO_SERVER_URL || 'http://localhost:8045' }}
 
     - name: Create and push tag
       run: |

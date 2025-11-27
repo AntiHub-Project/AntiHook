@@ -14,7 +14,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
-	
+
 	protocolRegistry "antihook/registry"
 )
 
@@ -23,6 +23,9 @@ const (
 	TargetDirName       = "Antihub"
 	ExeName             = "antihook.exe"
 )
+
+// DefaultServerURL can be set at build time using -ldflags "-X main.DefaultServerURL=..."
+var DefaultServerURL = "http://localhost:8045"
 
 func main() {
 	recoverFlag := flag.Bool("recover", false, "Restore original Kiro protocol handler")
@@ -142,7 +145,7 @@ func postCallback(callbackURL string) error {
 
 	serverURL := os.Getenv("KIRO_SERVER_URL")
 	if serverURL == "" {
-		serverURL = "http://localhost:8045"
+		serverURL = DefaultServerURL
 	}
 	
 	apiURL := serverURL + "/api/kiro/oauth/callback"
