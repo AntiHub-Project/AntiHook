@@ -12,9 +12,12 @@ env:
   KIRO_SERVER_URL: ${{ secrets.KIRO_SERVER_URL || 'http://localhost:8045' }}
 
 jobs:
-  build:
-    name: Build
+  build-and-release:
+    name: Build and Release
     runs-on: windows-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
     
     steps:
     - name: Checkout code
@@ -28,37 +31,6 @@ jobs:
     - name: Get dependencies
       run: go mod download
 
-    - name: Build
-      run: go build -v -o antihook.exe .
-
-    - name: Generate version info
-      id: version
-      run: |
-        $short_sha = "${{ github.sha }}".Substring(0, 7)
-        $date = Get-Date -Format "yyyyMMdd-HHmmss"
-        $version = "dev-$date-$short_sha"
-        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-        echo "Generated version: $version"
-      shell: pwsh
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: antihook-windows-${{ steps.version.outputs.VERSION }}
-        path: antihook.exe
-
-  release:
-    name: Release
-    needs: build
-    runs-on: windows-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    permissions:
-      contents: write
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
     - name: Generate version
       id: version
       run: |
@@ -69,11 +41,8 @@ jobs:
         echo "Generated version: $version"
       shell: pwsh
 
-    - name: Download artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: antihook-windows-${{ steps.version.outputs.VERSION }}
-        path: .
+    - name: Build
+      run: go build -v -ldflags="-s -w" -o antihook.exe .
 
     - name: Create and push tag
       run: |
