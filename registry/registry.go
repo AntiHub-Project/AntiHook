@@ -9,9 +9,11 @@ import (
 )
 
 const (
-	ProtocolName     = "kiro"
-	ProtocolScheme   = "kiro://"
-	RegistryBasePath = `Software\Classes`
+	ProtocolName      = "kiro"
+	ProtocolScheme    = "kiro://"
+	AntiProtocolName  = "anti"
+	AntiProtocolScheme = "anti://"
+	RegistryBasePath  = `Software\Classes`
 )
 
 type ProtocolHandler struct {
