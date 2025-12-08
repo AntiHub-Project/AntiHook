@@ -1,0 +1,14 @@
+# AntiHook 构建配置文件
+# 复制此文件为 .build.config 并修改配置
+
+# Kiro 服务器地址
+# 默认: http://localhost:8045
+SERVER_URL="http://localhost:8045"
+
+# 后端服务器地址
+# 默认: http://localhost:8008
+BACKEND_URL="http://localhost:8008"
+
+# 生产环境示例：
+# SERVER_URL="https://your-kiro-server.com"
+# BACKEND_URL="https://your-backend-server.com"

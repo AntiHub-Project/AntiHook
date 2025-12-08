@@ -10,15 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/windows/registry"
 
 	protocolRegistry "antihook/registry"
 )
@@ -27,14 +22,19 @@ const (
 	ProtocolDescription     = "Kiro Protocol Handler"
 	AntiProtocolDescription = "Anti Protocol Handler"
 	TargetDirName           = "Antihub"
-	ExeName                 = "antihook.exe"
 	OAuthCallbackPort       = 42532
 )
 
-var DefaultServerURL = "http://localhost:8045"
-var DefaultBackendURL = "http://localhost:8008"
+// 这些变量可以在编译时通过 -ldflags 注入
+var (
+	DefaultServerURL  = "http://localhost:8045"
+	DefaultBackendURL = "http://localhost:8008"
+	BuildVersion      = "dev"
+	BuildTime         = "unknown"
+)
 
 func init() {
+	// 环境变量优先级最高
 	if url := os.Getenv("KIRO_SERVER_URL"); url != "" {
 		DefaultServerURL = url
 	}
@@ -78,13 +78,13 @@ func main() {
 }
 
 func install() error {
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return fmt.Errorf("cannot get LOCALAPPDATA environment variable")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	targetDir := filepath.Join(localAppData, TargetDirName)
-	targetPath := filepath.Join(targetDir, ExeName)
+	targetDir := filepath.Join(homeDir, ".local", "bin", TargetDirName)
+	targetPath := filepath.Join(targetDir, "antihook")
 
 	currentPath, err := os.Executable()
 	if err != nil {
@@ -105,6 +105,11 @@ func install() error {
 
 		if err := copyFile(currentPath, targetPath); err != nil {
 			return fmt.Errorf("failed to copy file: %w", err)
+		}
+
+		// 确保可执行权限
+		if err := os.Chmod(targetPath, 0755); err != nil {
+			return fmt.Errorf("failed to set executable permission: %w", err)
 		}
 	}
 
@@ -156,17 +161,46 @@ func copyFile(src, dst string) error {
 }
 
 func handleProtocolCall(rawURL string) {
-	go showMessageBox("Info", "Logging in...", 0x40)
+	// 创建日志文件
+	homeDir, _ := os.UserHomeDir()
+	logFile, err := os.OpenFile(filepath.Join(homeDir, ".config", "antihook", "kiro.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		defer logFile.Close()
+		logFile.WriteString(fmt.Sprintf("\n=== %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
+		logFile.WriteString(fmt.Sprintf("Received kiro:// callback: %s\n", rawURL))
+	}
+	
+	// 记录接收到的回调 URL
+	fmt.Printf("Received kiro:// callback: %s\n", rawURL)
+	
+	// 移除了 "Logging in..." 弹框
 
 	if err := postCallback(rawURL); err != nil {
+		errMsg := fmt.Sprintf("Login failed: %v\n", err)
+		fmt.Printf(errMsg)
+		if logFile != nil {
+			logFile.WriteString(errMsg)
+		}
 		showMessageBox("Error", "Login failed: "+err.Error(), 0x10)
 		return
 	}
 
+	successMsg := "Login successful!\n"
+	fmt.Printf(successMsg)
+	if logFile != nil {
+		logFile.WriteString(successMsg)
+	}
 	showMessageBox("Success", "Login successful!", 0x40)
 }
 
 func postCallback(callbackURL string) error {
+	// 打开日志文件
+	homeDir, _ := os.UserHomeDir()
+	logFile, _ := os.OpenFile(filepath.Join(homeDir, ".config", "antihook", "kiro.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if logFile != nil {
+		defer logFile.Close()
+	}
+
 	requestBody := map[string]string{
 		"callback_url": callbackURL,
 	}
@@ -183,18 +217,48 @@ func postCallback(callbackURL string) error {
 
 	apiURL := serverURL + "/api/kiro/oauth/callback"
 
+	// 记录详细的请求信息
+	logMsg := fmt.Sprintf("Posting to: %s\n", apiURL)
+	fmt.Printf(logMsg)
+	if logFile != nil {
+		logFile.WriteString(logMsg)
+	}
+
+	logMsg = fmt.Sprintf("Request body: %s\n", string(jsonData))
+	fmt.Printf(logMsg)
+	if logFile != nil {
+		logFile.WriteString(logMsg)
+	}
+
 	resp, err := http.Post(
 		apiURL,
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
 	if err != nil {
+		errMsg := fmt.Sprintf("HTTP request failed: %v\n", err)
+		if logFile != nil {
+			logFile.WriteString(errMsg)
+		}
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// 读取响应内容
+	body, _ := io.ReadAll(resp.Body)
+	logMsg = fmt.Sprintf("Response status: %d\n", resp.StatusCode)
+	fmt.Printf(logMsg)
+	if logFile != nil {
+		logFile.WriteString(logMsg)
+	}
+
+	logMsg = fmt.Sprintf("Response body: %s\n", string(body))
+	fmt.Printf(logMsg)
+	if logFile != nil {
+		logFile.WriteString(logMsg)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("server returned error: %d, %s", resp.StatusCode, string(body))
 	}
 
@@ -221,7 +285,7 @@ func parseAntiProtocolURL(rawURL string) (*AntiProtocolParams, error) {
 	withoutProtocol = strings.TrimPrefix(withoutProtocol, "ANTI://")
 
 	parts := strings.SplitN(withoutProtocol, "?", 2)
-	
+
 	var bearer string
 	isShared := 0
 
@@ -362,7 +426,11 @@ func startOAuthCallbackServer(ctx context.Context, callbackChan chan<- string, e
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/oauth-callback", func(w http.ResponseWriter, r *http.Request) {
-		callbackURL := fmt.Sprintf("http://localhost:%d%s", OAuthCallbackPort, r.URL.String())
+		// 构造完整的回调 URL，包含所有查询参数
+		callbackURL := fmt.Sprintf("http://localhost:%d%s", OAuthCallbackPort, r.URL.RequestURI())
+
+		// 记录日志（可选，用于调试）
+		fmt.Printf("Received OAuth callback: %s\n", callbackURL)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -421,13 +489,10 @@ func startOAuthCallbackServer(ctx context.Context, callbackChan chan<- string, e
 		}
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	// 等待更长时间确保服务器完全启动
+	time.Sleep(500 * time.Millisecond)
 
 	return server
-}
-
-func openBrowser(url string) error {
-	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
 func postOAuthCallbackManual(serverURL, bearer, callbackURL string) error {
@@ -460,74 +525,6 @@ func postOAuthCallbackManual(serverURL, bearer, callbackURL string) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("server returned error: %d, %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-func showMessageBox(title, message string, flags uint) {
-	var mod = syscall.NewLazyDLL("user32.dll")
-	var proc = mod.NewProc("MessageBoxW")
-
-	titlePtr, _ := syscall.UTF16PtrFromString(title)
-	messagePtr, _ := syscall.UTF16PtrFromString(message)
-
-	proc.Call(
-		0,
-		uintptr(unsafe.Pointer(messagePtr)),
-		uintptr(unsafe.Pointer(titlePtr)),
-		uintptr(flags),
-	)
-}
-
-func addToPath(dir string) error {
-	key, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.QUERY_VALUE|registry.SET_VALUE)
-	if err != nil {
-		return fmt.Errorf("failed to open Environment key: %w", err)
-	}
-	defer key.Close()
-
-	currentPath, _, err := key.GetStringValue("Path")
-	if err != nil && err != registry.ErrNotExist {
-		return fmt.Errorf("failed to read PATH: %w", err)
-	}
-
-	if strings.Contains(strings.ToLower(currentPath), strings.ToLower(dir)) {
-		return nil
-	}
-
-	var newPath string
-	if currentPath == "" {
-		newPath = dir
-	} else {
-		newPath = currentPath + ";" + dir
-	}
-
-	if err := key.SetStringValue("Path", newPath); err != nil {
-		return fmt.Errorf("failed to set PATH: %w", err)
-	}
-
-	return nil
-}
-
-func recoverOriginal() error {
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return fmt.Errorf("cannot get LOCALAPPDATA environment variable")
-	}
-
-	originalPath := filepath.Join(localAppData, "Programs", "Kiro", "Kiro.exe")
-	originalCommand := fmt.Sprintf(`"%s" "--open-url" "--" "%%1"`, originalPath)
-
-	keyPath := `Software\Classes\kiro\shell\open\command`
-	key, err := registry.OpenKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
-	if err != nil {
-		return fmt.Errorf("failed to open command key: %w", err)
-	}
-	defer key.Close()
-
-	if err := key.SetStringValue("", originalCommand); err != nil {
-		return fmt.Errorf("failed to set command: %w", err)
 	}
 
 	return nil
