@@ -127,21 +127,6 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-        body: |
-          ## 📦 构建产物
-          
-          - `antihook.exe` - Windows (amd64)
-          - `antihook-darwin-amd64` - macOS Intel
-          - `antihook-darwin-arm64` - macOS Apple Silicon
-          
-          ## 🔧 配置信息
-          
-          - Kiro 服务器: ${{ secrets.KIRO_SERVER_URL || 'http://localhost:8045' }}
-          - 后端服务器: ${{ secrets.BACKEND_URL || 'http://localhost:8008' }}
-          - 构建版本: ${{ steps.version.outputs.VERSION }}
-          
-          ## 📖 使用说明
-          
-          请参考 [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) 了解详细的安装和使用方法。
+        body: ${{ steps.version.outputs.VERSION }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
